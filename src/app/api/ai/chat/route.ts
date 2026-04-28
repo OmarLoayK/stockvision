@@ -1,9 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth-guard';
+import { rateLimit, rateLimitHeaders } from '@/lib/rate-limit';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Stable system prompt — cached so repeated questions are ~90% cheaper
 const SYSTEM_PROMPT = `You are StockVision AI, an expert financial assistant embedded in a real-time stock analytics platform. You help users understand stocks, market trends, financial concepts, and portfolio strategy.
 
 Your capabilities:
@@ -26,19 +27,79 @@ Important guidelines:
 
 Respond in a conversational, knowledgeable tone. Be direct and helpful.`;
 
-export async function POST(req: NextRequest) {
-  const { messages, context } = await req.json();
+const MAX_MESSAGES = 40;
+const MAX_MESSAGE_LENGTH = 2000;
 
-  // Build the message list — inject market context if provided
-  const userMessages = context
+export async function POST(req: NextRequest) {
+  // Auth check — every AI call must be authenticated
+  const auth = await requireAuth();
+  if (auth.error) return auth.error;
+
+  // Rate limit: 15 AI chat requests per minute per user
+  const rl = rateLimit(`ai:chat:${auth.userId}`, 15, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please wait before sending another message.' },
+      { status: 429, headers: rateLimitHeaders(rl, 15) }
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  if (!body || typeof body !== 'object' || !('messages' in body)) {
+    return NextResponse.json({ error: 'Missing messages field' }, { status: 400 });
+  }
+
+  const { messages, context } = body as Record<string, unknown>;
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return NextResponse.json({ error: 'messages must be a non-empty array' }, { status: 400 });
+  }
+
+  // Validate and sanitise message array
+  const sanitised = messages
+    .slice(-MAX_MESSAGES) // only keep the last N messages to limit token spend
+    .map((m: unknown) => {
+      if (!m || typeof m !== 'object' || !('role' in m) || !('content' in m)) return null;
+      const msg = m as Record<string, unknown>;
+      if (msg.role !== 'user' && msg.role !== 'assistant') return null;
+      if (typeof msg.content !== 'string') return null;
+      return {
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content.slice(0, MAX_MESSAGE_LENGTH),
+      };
+    })
+    .filter(Boolean) as Array<{ role: 'user' | 'assistant'; content: string }>;
+
+  if (sanitised.length === 0) {
+    return NextResponse.json({ error: 'No valid messages provided' }, { status: 400 });
+  }
+
+  // Validate context if provided (must be a plain object with known numeric/string fields)
+  let safeContext: { symbol?: string; price?: number; change?: number } | null = null;
+  if (context && typeof context === 'object' && !Array.isArray(context)) {
+    const c = context as Record<string, unknown>;
+    safeContext = {
+      ...(typeof c.symbol === 'string' && /^[A-Z]{1,10}$/.test(c.symbol) ? { symbol: c.symbol } : {}),
+      ...(typeof c.price === 'number' && isFinite(c.price) ? { price: c.price } : {}),
+      ...(typeof c.change === 'number' && isFinite(c.change) ? { change: c.change } : {}),
+    };
+  }
+
+  const userMessages = safeContext
     ? [
+        ...sanitised.slice(0, -1),
         {
           role: 'user' as const,
-          content: `[Current market context: ${JSON.stringify(context)}]\n\n${messages[messages.length - 1].content}`,
+          content: `[Current market context: ${JSON.stringify(safeContext)}]\n\n${sanitised[sanitised.length - 1].content}`,
         },
-        ...messages.slice(0, -1).reverse(),
-      ].reverse()
-    : messages;
+      ]
+    : sanitised;
 
   const stream = await client.messages.stream({
     model: 'claude-opus-4-7',
@@ -48,14 +109,12 @@ export async function POST(req: NextRequest) {
       {
         type: 'text',
         text: SYSTEM_PROMPT,
-        // Cache the system prompt — it's large, stable, and reused on every chat turn
         cache_control: { type: 'ephemeral' },
       },
     ],
     messages: userMessages,
   });
 
-  // Stream the response as SSE
   const encoder = new TextEncoder();
   const readable = new ReadableStream({
     async start(controller) {
@@ -71,7 +130,7 @@ export async function POST(req: NextRequest) {
           }
         }
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      } catch (err) {
+      } catch {
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ error: 'Stream error' })}\n\n`)
         );
@@ -85,7 +144,8 @@ export async function POST(req: NextRequest) {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
+      'Connection': 'keep-alive',
+      ...rateLimitHeaders(rl, 15),
     },
   });
 }

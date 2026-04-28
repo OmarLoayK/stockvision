@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getQuote } from '@/lib/api/finnhub';
+import { parseSymbol } from '@/lib/auth-guard';
 
 export async function GET() {
   const supabase = await createClient();
@@ -50,7 +51,26 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { symbol, type, shares } = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const { symbol: rawSymbol, type, shares: rawShares } = (body ?? {}) as Record<string, unknown>;
+
+  const symbol = parseSymbol(rawSymbol);
+  if (!symbol) return NextResponse.json({ error: 'Invalid symbol' }, { status: 400 });
+
+  if (type !== 'BUY' && type !== 'SELL') {
+    return NextResponse.json({ error: 'type must be BUY or SELL' }, { status: 400 });
+  }
+
+  const shares = typeof rawShares === 'number' && isFinite(rawShares) && rawShares > 0 && rawShares <= 1_000_000
+    ? rawShares
+    : null;
+  if (!shares) return NextResponse.json({ error: 'shares must be a positive number' }, { status: 400 });
 
   const quote = await getQuote(symbol);
   const price = quote.price!;

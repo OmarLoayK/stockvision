@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { parseSymbol } from '@/lib/auth-guard';
 
 export async function GET() {
   const supabase = await createClient();
@@ -21,7 +22,26 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { symbol, type, threshold } = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const { symbol: rawSymbol, type, threshold: rawThreshold } = (body ?? {}) as Record<string, unknown>;
+
+  const symbol = parseSymbol(rawSymbol);
+  if (!symbol) return NextResponse.json({ error: 'Invalid symbol' }, { status: 400 });
+
+  if (type !== 'above' && type !== 'below') {
+    return NextResponse.json({ error: 'type must be above or below' }, { status: 400 });
+  }
+
+  const threshold = typeof rawThreshold === 'number' && isFinite(rawThreshold) && rawThreshold > 0
+    ? rawThreshold
+    : null;
+  if (!threshold) return NextResponse.json({ error: 'threshold must be a positive number' }, { status: 400 });
 
   const { data, error } = await supabase
     .from('alerts')

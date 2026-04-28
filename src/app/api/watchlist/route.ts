@@ -21,11 +21,21 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { name } = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const { name } = (body ?? {}) as Record<string, unknown>;
+  if (typeof name !== 'string' || !name.trim() || name.length > 50) {
+    return NextResponse.json({ error: 'name must be a non-empty string under 50 characters' }, { status: 400 });
+  }
 
   const { data, error } = await supabase
     .from('watchlists')
-    .insert({ name, user_id: user.id })
+    .insert({ name: name.trim(), user_id: user.id })
     .select()
     .single();
 
