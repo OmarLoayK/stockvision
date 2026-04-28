@@ -1,6 +1,8 @@
 import { getMarketNews } from '@/lib/api/finnhub';
 import { Badge } from '@/components/ui/Badge';
 import { Card, CardContent } from '@/components/ui/Card';
+import { AISummary } from '@/components/ai/AISummary';
+import { AIChatWidget } from '@/components/ai/AIChatWidget';
 import { formatDistanceToNow } from 'date-fns';
 
 export default async function NewsPage() {
@@ -12,6 +14,14 @@ export default async function NewsPage() {
         <h1 className="text-2xl font-bold text-white">Market News</h1>
         <p className="text-zinc-400 text-sm mt-1">Latest financial news and insights</p>
       </div>
+
+      <AISummary
+        articles={news.slice(0, 5).map((a) => ({
+          headline: a.headline,
+          summary: a.summary,
+          source: a.source,
+        }))}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {news.map((article) => (
@@ -51,6 +61,8 @@ export default async function NewsPage() {
           </a>
         ))}
       </div>
+
+      <AIChatWidget />
     </div>
   );
 }

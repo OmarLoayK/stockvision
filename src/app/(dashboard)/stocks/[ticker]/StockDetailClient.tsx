@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import { TrendingUp, TrendingDown, Star, Bell, ShoppingCart } from 'lucide-react';
 import { StockChart } from '@/components/charts/StockChart';
+import { AIInsights } from '@/components/ai/AIInsights';
+import { AISummary } from '@/components/ai/AISummary';
+import { AIChatWidget } from '@/components/ai/AIChatWidget';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -141,6 +144,16 @@ export function StockDetailClient({ symbol, initialQuote, initialCandles, initia
             </CardContent>
           </Card>
 
+          {/* AI News Summary */}
+          <AISummary
+            articles={initialNews.slice(0, 5).map((a) => ({
+              headline: a.headline,
+              summary: a.summary,
+              source: a.source,
+            }))}
+            symbol={symbol}
+          />
+
           {/* News */}
           <Card>
             <CardHeader><CardTitle>Latest News</CardTitle></CardHeader>
@@ -171,8 +184,21 @@ export function StockDetailClient({ symbol, initialQuote, initialCandles, initia
           </Card>
         </div>
 
-        {/* Trade Panel */}
+        {/* Right column: AI Insights + Trade Panel */}
         <div className="space-y-4">
+          <AIInsights
+            symbol={symbol}
+            quote={{
+              price,
+              changePercent,
+              high52Week: (quote.high52Week as number) || undefined,
+              low52Week: (quote.low52Week as number) || undefined,
+              volume: (quote.volume as number) || undefined,
+              marketCap: (quote.marketCap as number) || undefined,
+            }}
+            candles={candles}
+          />
+
           <Card>
             <CardHeader><CardTitle>Paper Trade</CardTitle></CardHeader>
             <CardContent className="space-y-4">
@@ -229,6 +255,8 @@ export function StockDetailClient({ symbol, initialQuote, initialCandles, initia
           </Card>
         </div>
       </div>
+
+      <AIChatWidget context={{ symbol, price, change: changePercent }} />
     </div>
   );
 }

@@ -5,6 +5,8 @@ import { TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { AIPortfolioAnalysis } from '@/components/ai/AIPortfolioAnalysis';
+import { AIChatWidget } from '@/components/ai/AIChatWidget';
 import { formatCurrency, formatPercent, formatNumber, cn } from '@/lib/utils';
 import type { PortfolioHolding } from '@/types';
 
@@ -61,6 +63,22 @@ export default function PortfolioPage() {
         ))}
       </div>
 
+      {/* AI Portfolio Analysis */}
+      {!loading && (
+        <AIPortfolioAnalysis
+          holdings={holdings.map((h) => ({
+            symbol: h.symbol,
+            shares: h.shares,
+            avgCost: h.avgCost,
+            currentPrice: h.currentPrice,
+            totalValue: h.totalValue,
+            gainLossPercent: h.gainLossPercent,
+          }))}
+          balance={balance}
+          totalValue={portfolioTotal}
+        />
+      )}
+
       {/* Holdings Table */}
       <Card>
         <CardHeader><CardTitle>Holdings</CardTitle></CardHeader>
@@ -114,6 +132,7 @@ export default function PortfolioPage() {
           )}
         </CardContent>
       </Card>
+      <AIChatWidget />
     </div>
   );
 }
